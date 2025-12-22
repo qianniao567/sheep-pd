@@ -384,8 +384,22 @@ app.get('*', (req, res) => {
 
 // ===== 启动逻辑 =====
 
+// 在服务器启动函数中添加更多调试
 async function startServer() {
   try {
+    console.log('=== 服务器启动详细信息 ===');
+    console.log('进程工作目录:', process.cwd());
+    console.log('后端文件位置:', __dirname);
+    
+    const frontendDistPath = path.join(__dirname, '../frontend/dist');
+    const indexPath = path.join(frontendDistPath, 'index.html');
+    
+    console.log('前端dist绝对路径:', frontendDistPath);
+    console.log('index.html绝对路径:', indexPath);
+    console.log('前端dist目录内容:', fs.existsSync(frontendDistPath) ? fs.readdirSync(frontendDistPath) : '目录不存在');
+    console.log('index.html存在:', fs.existsSync(indexPath));
+    
+    // 连接数据库
     const dbConnected = await connectDB();
     if (!dbConnected) {
       console.log('⚠️ 数据库连接失败，API功能将不可用');
@@ -393,6 +407,7 @@ async function startServer() {
     
     if (process.env.VERCEL) {
       console.log('🚀 运行在Vercel环境');
+      console.log('Vercel环境变量:', Object.keys(process.env).filter(key => key.includes('VERCEL')));
     } else {
       const PORT = process.env.PORT || 3000;
       app.listen(PORT, () => {
