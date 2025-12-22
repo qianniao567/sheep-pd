@@ -1,16 +1,3 @@
-// 修改导出方式以适应Vercel
-if (process.env.VERCEL) {
-  // Vercel环境
-  module.exports = app;
-} else {
-  // 本地开发环境
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
-  });
-}
-
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -33,20 +20,17 @@ const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let dbClient;
 let db;
 
-
 async function connectDB() {
   try {
     console.log('🔗 尝试连接MongoDB...');
     console.log('MongoDB URI:', process.env.MONGODB_URI ? '已设置' : '未设置');
     
-    // 打印部分连接信息（不包含密码）
     if (process.env.MONGODB_URI) {
       const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
       console.log('连接字符串:', uriForLog);
     }
     
     dbClient = new MongoClient(uri);
-    
     await dbClient.connect();
     db = dbClient.db('sheepPD');
     console.log('✅ 成功连接到 MongoDB Atlas');
@@ -68,7 +52,7 @@ async function importFromColorCodes() {
     
     if (!fs.existsSync(filePath)) {
       console.log('color_codes.txt文件不存在，跳过导入');
-      return;
+      return 0;
     }
     
     console.log('文件存在，开始读取...');
@@ -125,13 +109,6 @@ async function initializeCollections() {
   }
 }
 
-// 启动时连接数据库
-connectDB().then(success => {
-  if (!success) {
-    console.log('⚠️ 数据库连接失败，API功能将不可用');
-  }
-});
-
 // ===== API 路由 =====
 
 // 测试接口
@@ -144,17 +121,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// 确保所有非API路由返回前端页面
-app.get('*', (req, res) => {
-  // 如果是API路由，继续处理
-  if (req.path.startsWith('/api/')) {
-    return next();
-  }
-  // 否则返回前端页面
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-});
-
-
 // API状态检查
 app.get('/api', (req, res) => {
   res.json({ 
@@ -163,7 +129,6 @@ app.get('/api', (req, res) => {
     version: '1.0'
   });
 });
-
 
 // 获取所有库存
 app.get('/api/inventory', async (req, res) => {
@@ -189,7 +154,6 @@ app.get('/api/inventory/:id', async (req, res) => {
   
   const id = req.params.id;
   try {
-    // 添加 ObjectId 格式验证
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: '无效的ID格式' });
       return;
@@ -257,7 +221,6 @@ app.put('/api/inventory/:id', async (req, res) => {
   }
   
   try {
-    // 添加 ObjectId 格式验证
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: '无效的ID格式' });
       return;
@@ -295,7 +258,6 @@ app.patch('/api/inventory/:id/adjust', async (req, res) => {
   }
   
   try {
-    // 添加 ObjectId 格式验证
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: '无效的ID格式' });
       return;
@@ -345,7 +307,6 @@ app.delete('/api/inventory/:id', async (req, res) => {
   const id = req.params.id;
   
   try {
-    // 添加 ObjectId 格式验证
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: '无效的ID格式' });
       return;
@@ -384,20 +345,34 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
+// ===== 启动逻辑 =====
 
-// Vercel需要这种导出方式
-if (process.env.VERCEL) {
-  module.exports = app;
-} else {
-  // 本地开发环境
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
-  });
+// 异步启动函数
+async function startServer() {
+  try {
+    // 连接数据库
+    const dbConnected = await connectDB();
+    if (!dbConnected) {
+      console.log('⚠️ 数据库连接失败，API功能将不可用');
+    }
+    
+    // 如果是Vercel环境，只导出app
+    if (process.env.VERCEL) {
+      console.log('🚀 运行在Vercel环境');
+    } else {
+      // 本地环境，启动服务器
+      const PORT = process.env.PORT || 3000;
+      app.listen(PORT, () => {
+        console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
+      });
+    }
+  } catch (error) {
+    console.error('❌ 服务器启动失败:', error);
+  }
 }
 
+// 启动服务器
+startServer();
+
+// Vercel需要导出app（这是唯一的导出语句）
 module.exports = app;
-
-
-
