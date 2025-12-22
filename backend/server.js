@@ -1,3 +1,66 @@
+// 在文件开头添加这些健康检查路由
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'SheepPD后端服务运行正常',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    vercel: !!process.env.VERCEL
+  });
+});
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    backend: 'running',
+    database: db ? 'connected' : 'disconnected',
+    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 演示数据端点
+app.get('/api/inventory/demo', (req, res) => {
+  // 从color_codes.txt读取数据生成演示数据
+  try {
+    const demoData = generateDemoData();
+    res.json({ 
+      inventory: demoData, 
+      source: 'demo',
+      message: '使用演示数据（数据库连接失败）'
+    });
+  } catch (error) {
+    // 硬编码的演示数据
+    const fallbackData = [
+      { _id: 'demo1', code: 'A1', quantity: 10 },
+      { _id: 'demo2', code: 'A2', quantity: 5 },
+      { _id: 'demo3', code: 'B1', quantity: 0 }
+    ];
+    res.json({ inventory: fallbackData, source: 'fallback' });
+  }
+});
+
+function generateDemoData() {
+  try {
+    const filePath = path.join(__dirname, 'color_codes.txt');
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const codes = data.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .slice(0, 50); // 只取前50个作为演示
+      
+      return codes.map((code, index) => ({
+        _id: `demo${index + 1}`,
+        code,
+        quantity: code === 'A1' ? 10 : Math.floor(Math.random() * 5)
+      }));
+    }
+  } catch (error) {
+    console.error('生成演示数据失败:', error);
+  }
+  return [];
+}
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
