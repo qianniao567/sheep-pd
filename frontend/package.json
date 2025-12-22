@@ -1,20 +1,12 @@
 {
-  "name": "sheepPD-frontend",
+  "name": "sheep-pd",
   "version": "1.0.0",
-  "description": "SheepPD拼豆库存管理平台前端",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "cd frontend && npm install && npm run build",
+    "dev": "cd frontend && npm run dev",
+    "start": "node backend/server.js"
   },
-  "dependencies": {
-    "vue": "^3.3.4",
-    "element-plus": "^2.3.8",
-    "@element-plus/icons-vue": "^2.1.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "vite": "^5.0.0"
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
