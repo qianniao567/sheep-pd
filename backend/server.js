@@ -57,21 +57,54 @@ let db;
 async function connectDB() {
   try {
     console.log('🔗 尝试连接MongoDB...');
+    console.log('MongoDB URI 已设置:', !!process.env.MONGODB_URI);
     
+    // 安全地打印连接字符串（隐藏密码）
     if (process.env.MONGODB_URI) {
       const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
-      console.log('MongoDB连接字符串:', uriForLog);
+      console.log('连接字符串:', uriForLog);
+    } else {
+      console.log('❌ MONGODB_URI 环境变量未设置');
+      return false;
     }
     
+    // 测试连接参数
+    console.log('连接参数检查:');
+    console.log('- 数据库名称:', 'sheepPD');
+    console.log('- 重试写入:', true);
+    
     dbClient = new MongoClient(uri);
+    console.log('📡 开始连接数据库...');
+    
     await dbClient.connect();
+    console.log('✅ MongoDB 客户端连接成功');
+    
     db = dbClient.db('sheepPD');
-    console.log('✅ 成功连接到 MongoDB Atlas');
+    console.log('✅ 数据库实例创建成功');
+    
+    // 测试数据库操作
+    const adminDb = dbClient.db('admin');
+    const result = await adminDb.command({ ping: 1 });
+    console.log('✅ 数据库ping测试成功:', result);
     
     await initializeCollections();
     return true;
   } catch (e) {
-    console.error('❌ MongoDB 连接失败:', e.message);
+    console.error('❌ MongoDB 连接失败:');
+    console.error('错误信息:', e.message);
+    console.error('错误代码:', e.code);
+    console.error('错误名称:', e.name);
+    console.error('完整错误:', e);
+    
+    // 提供具体的解决建议
+    if (e.message.includes('ENOTFOUND')) {
+      console.error('💡 解决建议: 检查MongoDB Atlas集群地址是否正确');
+    } else if (e.message.includes('Authentication failed')) {
+      console.error('💡 解决建议: 检查用户名和密码是否正确');
+    } else if (e.message.includes('timed out')) {
+      console.error('💡 解决建议: 检查网络连接和IP白名单设置');
+    }
+    
     return false;
   }
 }
@@ -150,6 +183,35 @@ app.get('/api', (req, res) => {
     timestamp: new Date().toISOString(),
     version: '1.0'
   });
+});
+
+// 数据库连接状态检查
+app.get('/api/db-status', async (req, res) => {
+  try {
+    if (!db) {
+      return res.json({
+        status: 'disconnected',
+        message: '数据库未连接',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // 测试数据库连接
+    await db.command({ ping: 1 });
+    
+    res.json({
+      status: 'connected',
+      message: '数据库连接正常',
+      timestamp: new Date().toISOString(),
+      database: db.databaseName
+    });
+  } catch (error) {
+    res.json({
+      status: 'error',
+      message: '数据库连接错误: ' + error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // 获取所有库存
