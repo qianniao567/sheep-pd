@@ -1,3 +1,16 @@
+// 修改导出方式以适应Vercel
+if (process.env.VERCEL) {
+  // Vercel环境
+  module.exports = app;
+} else {
+  // 本地开发环境
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
+  });
+}
+
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -351,10 +364,18 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-if (require.main === module) {
+// Vercel需要这种导出方式
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  // 本地开发环境
+  const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
   });
 }
 
 module.exports = app;
+
+
+
