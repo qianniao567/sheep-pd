@@ -1,0 +1,360 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { MongoClient, ObjectId } = require('mongodb');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+
+// 中间件
+app.use(cors());
+app.use(express.json());
+
+// 静态文件服务
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+// ===== MongoDB 连接设置 =====
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+
+let dbClient;
+let db;
+
+async function connectDB() {
+  try {
+    // 移除已弃用的选项
+    dbClient = new MongoClient(uri);
+    
+    await dbClient.connect();
+    db = dbClient.db('sheepPD');
+    console.log('✅ 成功连接到 MongoDB Atlas');
+    
+    await initializeCollections();
+    return true;
+  } catch (e) {
+    console.error('❌ MongoDB 连接失败:', e.message);
+    return false;
+  }
+}
+
+async function importFromColorCodes() {
+  try {
+    console.log('开始导入数据...');
+    const filePath = path.join(__dirname, 'color_codes.txt');
+    console.log('文件路径:', filePath);
+    
+    if (!fs.existsSync(filePath)) {
+      console.log('color_codes.txt文件不存在，跳过导入');
+      return;
+    }
+    
+    console.log('文件存在，开始读取...');
+    const data = fs.readFileSync(filePath, 'utf8');
+    console.log('文件内容长度:', data.length);
+    
+    const codes = data.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    console.log('解析出的编号数量:', codes.length);
+    console.log('前10个编号:', codes.slice(0, 10));
+    
+    const inventoryData = codes.map(code => ({
+      code,
+      quantity: 0,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }));
+    
+    if (inventoryData.length > 0) {
+      console.log('开始插入数据到数据库...');
+      const result = await db.collection('inventory').insertMany(inventoryData);
+      console.log(`从color_codes.txt导入了 ${result.insertedCount} 个编号`);
+      return result.insertedCount;
+    } else {
+      console.log('color_codes.txt中没有有效数据');
+      return 0;
+    }
+  } catch (error) {
+    console.error('从color_codes.txt导入数据失败:', error);
+    throw error;
+  }
+}
+
+async function initializeCollections() {
+  try {
+    console.log('开始初始化集合...');
+    const inventoryCollection = db.collection('inventory');
+    await inventoryCollection.createIndex({ code: 1 }, { unique: true });
+    
+    const count = await inventoryCollection.countDocuments();
+    console.log(`当前库存集合中的记录数: ${count}`);
+    
+    if (count === 0) {
+      console.log('库存集合为空，开始从color_codes.txt导入数据');
+      const importedCount = await importFromColorCodes();
+      console.log(`导入完成，共导入 ${importedCount} 条记录`);
+    } else {
+      console.log(`库存集合已有 ${count} 条记录，跳过导入`);
+    }
+  } catch (e) {
+    console.error('初始化集合失败:', e);
+  }
+}
+
+// 启动时连接数据库
+connectDB().then(success => {
+  if (!success) {
+    console.log('⚠️ 数据库连接失败，API功能将不可用');
+  }
+});
+
+// ===== API 路由 =====
+
+// 测试接口
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'SheepPD拼豆库存管理系统后端服务启动成功！',
+    timestamp: new Date().toISOString(),
+    version: '1.0',
+    environment: process.env.VERCEL ? 'Vercel' : 'Local'
+  });
+});
+
+// API状态检查
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'SheepPD拼豆库存管理系统API服务正常',
+    timestamp: new Date().toISOString(),
+    version: '1.0'
+  });
+});
+
+// 获取所有库存
+app.get('/api/inventory', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  try {
+    const inventory = await db.collection('inventory').find().toArray();
+    res.json({ inventory });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 获取单个库存项
+app.get('/api/inventory/:id', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const id = req.params.id;
+  try {
+    // 添加 ObjectId 格式验证
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const item = await db.collection('inventory').findOne({ _id: new ObjectId(id) });
+    if (!item) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    res.json({ item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 添加新库存项
+app.post('/api/inventory', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const { code, quantity = 0 } = req.body;
+  
+  if (!code) {
+    res.status(400).json({ error: '编号不能为空' });
+    return;
+  }
+
+  try {
+    const result = await db.collection('inventory').insertOne({
+      code,
+      quantity: parseInt(quantity),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    res.json({ 
+      message: '库存项添加成功', 
+      itemId: result.insertedId 
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      res.status(400).json({ error: '该编号已存在' });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+// 更新库存数量
+app.put('/api/inventory/:id', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const { quantity } = req.body;
+  const id = req.params.id;
+  
+  if (quantity === undefined || quantity < 0) {
+    res.status(400).json({ error: '无效的数量' });
+    return;
+  }
+  
+  try {
+    // 添加 ObjectId 格式验证
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const result = await db.collection('inventory').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { quantity: parseInt(quantity), updatedAt: new Date() } }
+    );
+    
+    if (result.matchedCount === 0) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    
+    res.json({ message: '库存更新成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 调整库存（增加或减少）
+app.patch('/api/inventory/:id/adjust', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const { operation, amount } = req.body;
+  const id = req.params.id;
+  
+  if (!operation || !amount || amount <= 0) {
+    res.status(400).json({ error: '无效的操作或数量' });
+    return;
+  }
+  
+  try {
+    // 添加 ObjectId 格式验证
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const item = await db.collection('inventory').findOne({ _id: new ObjectId(id) });
+    if (!item) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    
+    let newQuantity = item.quantity;
+    if (operation === 'add') {
+      newQuantity += parseInt(amount);
+    } else if (operation === 'subtract') {
+      newQuantity -= parseInt(amount);
+      if (newQuantity < 0) {
+        res.status(400).json({ error: '库存不足' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: '无效的操作类型' });
+      return;
+    }
+    
+    const result = await db.collection('inventory').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { quantity: newQuantity, updatedAt: new Date() } }
+    );
+    
+    res.json({ 
+      message: '库存调整成功', 
+      newQuantity 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 删除库存项
+app.delete('/api/inventory/:id', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const id = req.params.id;
+  
+  try {
+    // 添加 ObjectId 格式验证
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const result = await db.collection('inventory').deleteOne({ _id: new ObjectId(id) });
+    
+    if (result.deletedCount === 0) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    
+    res.json({ message: '库存项删除成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 手动导入数据的API端点
+app.post('/api/import-from-file', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  try {
+    const count = await importFromColorCodes();
+    res.json({ message: `成功导入 ${count} 条记录` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 所有其他路由返回前端页面
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`✅ 后端服务运行在 http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
