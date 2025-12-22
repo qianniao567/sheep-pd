@@ -169,9 +169,19 @@ const apiService = {
 
   // 获取库存数据
   async getInventory() {
+  try {
     const response = await fetch(`${this.getBaseUrl()}/inventory`);
-    return response.json();
-  },
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn('获取真实库存失败，尝试演示数据:', error);
+    // 降级到演示数据
+    const demoResponse = await fetch(`${this.getBaseUrl()}/inventory/demo`);
+    return await demoResponse.json();
+  }
+}
 
   // 添加库存项
   async addItem(item) {
