@@ -12,7 +12,7 @@ console.log('=== 服务器启动调试信息 ===');
 console.log('当前工作目录:', process.cwd());
 console.log('__dirname:', __dirname);
 
-const frontendDistPath = path.join(__dirname, '../frontend/dist');
+const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
 const indexPath = path.join(frontendDistPath, 'index.html');
 
 console.log('前端dist路径:', frontendDistPath);

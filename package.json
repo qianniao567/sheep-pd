@@ -1,5 +1,12 @@
 {
-  "dependencies": {
-    "mongodb": "^6.20.0"
+  "name": "sheep-pd",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "dev": "cd frontend && npm run dev",
+    "start": "node backend/server.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
