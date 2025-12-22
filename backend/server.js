@@ -7,126 +7,205 @@ const fs = require('fs');
 
 const app = express();
 
-// ===== 详细调试信息 =====
-console.log('=== 🚀 服务器启动详细调试信息 ===');
-console.log('📁 当前工作目录:', process.cwd());
-console.log('📁 __dirname:', __dirname);
-console.log('🌍 NODE_ENV:', process.env.NODE_ENV);
-console.log('⚡ VERCEL:', !!process.env.VERCEL);
-console.log('🔑 MONGODB_URI 已设置:', !!process.env.MONGODB_URI);
+// ===== 调试信息 =====
+console.log('=== 服务器启动调试信息 ===');
+console.log('当前工作目录:', process.cwd());
+console.log('__dirname:', __dirname);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('VERCEL:', process.env.VERCEL);
+console.log('MONGODB_URI 已设置:', !!process.env.MONGODB_URI);
 
-// 安全打印连接字符串
+// 安全地打印连接字符串
 if (process.env.MONGODB_URI) {
   const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
-  console.log('🔗 MongoDB连接字符串:', uriForLog);
+  console.log('MongoDB连接字符串:', uriForLog);
 }
 
-// 计算正确的文件路径
-const frontendDistPath = path.join(process.cwd(), 'frontend', 'dist');
+// 计算前端文件路径
+const frontendDistPath = process.env.VERCEL 
+  ? path.join(process.cwd(), 'frontend', 'dist')
+  : path.join(__dirname, '../frontend/dist');
+
 const indexPath = path.join(frontendDistPath, 'index.html');
 
-console.log('🔍 前端dist路径:', frontendDistPath);
-console.log('🔍 index.html路径:', indexPath);
-console.log('✅ index.html存在:', fs.existsSync(indexPath));
+console.log('前端dist路径:', frontendDistPath);
+console.log('index.html路径:', indexPath);
+console.log('index.html存在:', fs.existsSync(indexPath));
 
 // 列出目录内容
 try {
-  console.log('📂 当前工作目录内容:');
-  const files = fs.readdirSync(process.cwd());
-  files.forEach(file => {
-    const filePath = path.join(process.cwd(), file);
-    const stat = fs.statSync(filePath);
-    console.log(`  📁 ${file} - ${stat.isDirectory() ? '目录' : '文件'}`);
-  });
+  console.log('当前工作目录内容:', fs.readdirSync(process.cwd()));
 } catch (e) {
-  console.log('❌ 无法读取工作目录:', e.message);
-}
-
-// 检查frontend目录
-try {
-  const frontendDir = path.join(process.cwd(), 'frontend');
-  console.log('📁 frontend目录存在:', fs.existsSync(frontendDir));
-  if (fs.existsSync(frontendDir)) {
-    console.log('📁 frontend目录内容:', fs.readdirSync(frontendDir));
-  }
-} catch (e) {
-  console.log('❌ 无法读取frontend目录:', e.message);
-}
-
-// 检查dist目录
-try {
-  console.log('📁 dist目录存在:', fs.existsSync(frontendDistPath));
-  if (fs.existsSync(frontendDistPath)) {
-    console.log('📁 dist目录内容:', fs.readdirSync(frontendDistPath));
-  }
-} catch (e) {
-  console.log('❌ 无法读取dist目录:', e.message);
+  console.log('无法读取工作目录:', e.message);
 }
 
 // 中间件
 app.use(cors());
 app.use(express.json());
-
-// 静态文件服务 - 修正路径
 app.use(express.static(frontendDistPath));
-console.log('✅ 静态文件服务已设置，路径:', frontendDistPath);
 
 // ===== MongoDB 连接设置 =====
-const uri = process.env.MONGODB_URI;
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+
 let dbClient;
 let db;
-let isDBConnected = false;
 
 async function connectDB() {
   try {
-    console.log('\n🔗 尝试连接MongoDB...');
+    console.log('🔗 尝试连接MongoDB...');
     
     if (!uri) {
-      console.log('❌ MONGODB_URI 未设置');
+      console.log('❌ MONGODB_URI 未设置，跳过数据库连接');
       return false;
     }
     
-    console.log('📡 创建MongoDB客户端...');
-    dbClient = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000,
-    });
-    
-    console.log('🔄 连接数据库...');
+    dbClient = new MongoClient(uri);
     await dbClient.connect();
     db = dbClient.db('sheepPD');
-    console.log('✅ MongoDB 连接成功');
+    console.log('✅ 成功连接到 MongoDB Atlas');
     
-    // 测试连接
-    await db.command({ ping: 1 });
-    console.log('✅ 数据库ping测试成功');
-    
-    isDBConnected = true;
+    await initializeCollections();
     return true;
-  } catch (error) {
-    console.error('❌ MongoDB 连接失败:', error.message);
+  } catch (e) {
+    console.error('❌ MongoDB 连接失败:', e.message);
     return false;
   }
 }
 
+async function importFromColorCodes() {
+  try {
+    console.log('开始导入数据...');
+    const filePath = path.join(__dirname, 'color_codes.txt');
+    console.log('文件路径:', filePath);
+    
+    if (!fs.existsSync(filePath)) {
+      console.log('color_codes.txt文件不存在，跳过导入');
+      return 0;
+    }
+    
+    const data = fs.readFileSync(filePath, 'utf8');
+    const codes = data.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    console.log('解析出的编号数量:', codes.length);
+    
+    const inventoryData = codes.map(code => ({
+      code,
+      quantity: 0,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }));
+    
+    if (inventoryData.length > 0) {
+      const result = await db.collection('inventory').insertMany(inventoryData);
+      console.log(`从color_codes.txt导入了 ${result.insertedCount} 个编号`);
+      return result.insertedCount;
+    }
+    return 0;
+  } catch (error) {
+    console.error('从color_codes.txt导入数据失败:', error);
+    throw error;
+  }
+}
+
+async function initializeCollections() {
+  try {
+    console.log('开始初始化集合...');
+    const inventoryCollection = db.collection('inventory');
+    await inventoryCollection.createIndex({ code: 1 }, { unique: true });
+    
+    const count = await inventoryCollection.countDocuments();
+    console.log(`当前库存集合中的记录数: ${count}`);
+    
+    if (count === 0) {
+      console.log('库存集合为空，开始从color_codes.txt导入数据');
+      const importedCount = await importFromColorCodes();
+      console.log(`导入完成，共导入 ${importedCount} 条记录`);
+    }
+  } catch (e) {
+    console.error('初始化集合失败:', e);
+  }
+}
+
+// 演示数据生成函数
+function generateDemoData() {
+  try {
+    const filePath = path.join(__dirname, 'color_codes.txt');
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const codes = data.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .slice(0, 50);
+      
+      return codes.map((code, index) => ({
+        _id: `demo${index + 1}`,
+        code,
+        quantity: code === 'A1' ? 10 : Math.floor(Math.random() * 5)
+      }));
+    }
+  } catch (error) {
+    console.error('生成演示数据失败:', error);
+  }
+  return [];
+}
+
 // ===== API 路由 =====
 
-// 健康检查
+// 健康检查端点
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'SheepPD后端服务运行正常',
     timestamp: new Date().toISOString(),
-    database: isDBConnected ? 'connected' : 'disconnected',
-    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    vercel: !!process.env.VERCEL
   });
 });
 
-// 数据库状态
+// 系统状态检查
+app.get('/api/status', (req, res) => {
+  res.json({
+    backend: 'running',
+    database: db ? 'connected' : 'disconnected',
+    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 演示数据端点
+app.get('/api/inventory/demo', (req, res) => {
+  try {
+    const demoData = generateDemoData();
+    res.json({ 
+      inventory: demoData, 
+      source: 'demo',
+      message: '使用演示数据（数据库连接失败）'
+    });
+  } catch (error) {
+    const fallbackData = [
+      { _id: 'demo1', code: 'A1', quantity: 10 },
+      { _id: 'demo2', code: 'A2', quantity: 5 },
+      { _id: 'demo3', code: 'B1', quantity: 0 }
+    ];
+    res.json({ inventory: fallbackData, source: 'fallback' });
+  }
+});
+
+// API状态检查
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'SheepPD拼豆库存管理系统API服务正常',
+    timestamp: new Date().toISOString(),
+    version: '1.0'
+  });
+});
+
+// 数据库连接状态检查
 app.get('/api/db-status', async (req, res) => {
   try {
-    if (!isDBConnected) {
+    if (!db) {
       return res.json({
         status: 'disconnected',
         message: '数据库未连接',
@@ -135,6 +214,7 @@ app.get('/api/db-status', async (req, res) => {
     }
     
     await db.command({ ping: 1 });
+    
     res.json({
       status: 'connected',
       message: '数据库连接正常',
@@ -150,37 +230,58 @@ app.get('/api/db-status', async (req, res) => {
   }
 });
 
-// 获取库存数据
+// 获取所有库存
 app.get('/api/inventory', async (req, res) => {
-  if (!isDBConnected) {
-    return res.status(500).json({ 
-      error: '数据库未连接',
-      suggestion: '请检查MongoDB Atlas配置'
-    });
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
   }
   
   try {
     const inventory = await db.collection('inventory').find().toArray();
-    res.json({ 
-      inventory,
-      total: inventory.length,
-      source: 'mongodb'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.json({ inventory });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 添加库存项
+// 获取单个库存项
+app.get('/api/inventory/:id', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const id = req.params.id;
+  try {
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const item = await db.collection('inventory').findOne({ _id: new ObjectId(id) });
+    if (!item) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    res.json({ item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 添加新库存项
 app.post('/api/inventory', async (req, res) => {
-  if (!isDBConnected) {
-    return res.status(500).json({ error: '数据库未连接' });
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
   }
   
   const { code, quantity = 0 } = req.body;
   
   if (!code) {
-    return res.status(400).json({ error: '编号不能为空' });
+    res.status(400).json({ error: '编号不能为空' });
+    return;
   }
 
   try {
@@ -195,31 +296,34 @@ app.post('/api/inventory', async (req, res) => {
       message: '库存项添加成功', 
       itemId: result.insertedId 
     });
-  } catch (error) {
-    if (error.code === 11000) {
+  } catch (err) {
+    if (err.code === 11000) {
       res.status(400).json({ error: '该编号已存在' });
     } else {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: err.message });
     }
   }
 });
 
 // 更新库存数量
 app.put('/api/inventory/:id', async (req, res) => {
-  if (!isDBConnected) {
-    return res.status(500).json({ error: '数据库未连接' });
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
   }
   
   const { quantity } = req.body;
   const id = req.params.id;
   
   if (quantity === undefined || quantity < 0) {
-    return res.status(400).json({ error: '无效的数量' });
+    res.status(400).json({ error: '无效的数量' });
+    return;
   }
   
   try {
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: '无效的ID格式' });
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
     }
     
     const result = await db.collection('inventory').updateOne(
@@ -228,35 +332,109 @@ app.put('/api/inventory/:id', async (req, res) => {
     );
     
     if (result.matchedCount === 0) {
-      return res.status(404).json({ error: '库存项不存在' });
+      res.status(404).json({ error: '库存项不存在' });
+      return;
     }
     
     res.json({ message: '库存更新成功' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 调整库存（增加或减少）
+app.patch('/api/inventory/:id/adjust', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  const { operation, amount } = req.body;
+  const id = req.params.id;
+  
+  if (!operation || !amount || amount <= 0) {
+    res.status(400).json({ error: '无效的操作或数量' });
+    return;
+  }
+  
+  try {
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
+    }
+    
+    const item = await db.collection('inventory').findOne({ _id: new ObjectId(id) });
+    if (!item) {
+      res.status(404).json({ error: '库存项不存在' });
+      return;
+    }
+    
+    let newQuantity = item.quantity;
+    if (operation === 'add') {
+      newQuantity += parseInt(amount);
+    } else if (operation === 'subtract') {
+      newQuantity -= parseInt(amount);
+      if (newQuantity < 0) {
+        res.status(400).json({ error: '库存不足' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: '无效的操作类型' });
+      return;
+    }
+    
+    const result = await db.collection('inventory').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { quantity: newQuantity, updatedAt: new Date() } }
+    );
+    
+    res.json({ 
+      message: '库存调整成功', 
+      newQuantity 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // 删除库存项
 app.delete('/api/inventory/:id', async (req, res) => {
-  if (!isDBConnected) {
-    return res.status(500).json({ error: '数据库未连接' });
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
   }
   
   const id = req.params.id;
   
   try {
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: '无效的ID格式' });
+      res.status(400).json({ error: '无效的ID格式' });
+      return;
     }
     
     const result = await db.collection('inventory').deleteOne({ _id: new ObjectId(id) });
     
     if (result.deletedCount === 0) {
-      return res.status(404).json({ error: '库存项不存在' });
+      res.status(404).json({ error: '库存项不存在' });
+      return;
     }
     
     res.json({ message: '库存项删除成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 手动导入数据
+app.post('/api/import-from-file', async (req, res) => {
+  if (!db) {
+    res.status(500).json({ error: '数据库未连接' });
+    return;
+  }
+  
+  try {
+    const count = await importFromColorCodes();
+    res.json({ message: `成功导入 ${count} 条记录` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -264,35 +442,27 @@ app.delete('/api/inventory/:id', async (req, res) => {
 
 // ===== 前端路由 =====
 
-// 根路径
+// 根路径返回前端页面
 app.get('/', (req, res) => {
-  console.log('🏠 访问根路径');
+  console.log('📄 访问根路径，返回前端页面');
   
   if (fs.existsSync(indexPath)) {
     console.log('✅ 找到index.html，发送文件');
     res.sendFile(indexPath);
   } else {
     console.log('❌ index.html不存在，返回错误信息');
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>SheepPD - 错误</title></head>
-      <body>
-        <h1>🐑 SheepPD拼豆管理系统</h1>
-        <div style="padding: 20px;">
-          <h2 style="color: red;">❌ 前端文件未找到</h2>
-          <p><strong>文件路径:</strong> ${indexPath}</p>
-          <p><strong>建议:</strong> 请检查前端构建配置</p>
-          <p><a href="/api/health">健康检查</a> | <a href="/api/inventory">库存API</a></p>
-        </div>
-      </body>
-      </html>
-    `);
+    res.status(500).json({
+      error: '前端文件未找到',
+      path: indexPath,
+      suggestion: '请运行: cd frontend && npm run build'
+    });
   }
 });
 
 // 所有其他路由返回前端页面
 app.get('*', (req, res) => {
+  console.log('🔀 捕获路由:', req.path, '返回前端页面');
+  
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
@@ -303,27 +473,32 @@ app.get('*', (req, res) => {
   }
 });
 
-// ===== 启动服务器 =====
+// ===== 启动逻辑 =====
 async function startServer() {
-  console.log('\n🚀 启动服务器...');
-  
-  // 连接数据库
-  const dbConnected = await connectDB();
-  if (!dbConnected) {
-    console.log('⚠️ 数据库连接失败，部分功能将不可用');
-  }
-  
-  if (process.env.VERCEL) {
-    console.log('✅ 运行在Vercel环境');
-  } else {
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
-      console.log(`✅ 服务运行在 http://localhost:${PORT}`);
-    });
+  try {
+    console.log('🚀 启动服务器...');
+    
+    // 连接数据库
+    const dbConnected = await connectDB();
+    if (!dbConnected) {
+      console.log('⚠️ 数据库连接失败，API功能将不可用');
+    }
+    
+    if (process.env.VERCEL) {
+      console.log('✅ 运行在Vercel环境');
+    } else {
+      const PORT = process.env.PORT || 3000;
+      app.listen(PORT, () => {
+        console.log(`✅ 服务运行在 http://localhost:${PORT}`);
+      });
+    }
+  } catch (error) {
+    console.error('❌ 服务器启动失败:', error);
   }
 }
 
 // 启动服务器
 startServer();
 
+// Vercel需要导出app
 module.exports = app;
