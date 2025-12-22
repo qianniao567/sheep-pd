@@ -181,7 +181,7 @@ const apiService = {
     const demoResponse = await fetch(`${this.getBaseUrl()}/inventory/demo`);
     return await demoResponse.json();
   }
-}
+},
 
   // 添加库存项
   async addItem(item) {

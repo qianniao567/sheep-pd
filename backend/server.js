@@ -1,66 +1,3 @@
-// 在文件开头添加这些健康检查路由
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'SheepPD后端服务运行正常',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    vercel: !!process.env.VERCEL
-  });
-});
-
-app.get('/api/status', (req, res) => {
-  res.json({
-    backend: 'running',
-    database: db ? 'connected' : 'disconnected',
-    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 演示数据端点
-app.get('/api/inventory/demo', (req, res) => {
-  // 从color_codes.txt读取数据生成演示数据
-  try {
-    const demoData = generateDemoData();
-    res.json({ 
-      inventory: demoData, 
-      source: 'demo',
-      message: '使用演示数据（数据库连接失败）'
-    });
-  } catch (error) {
-    // 硬编码的演示数据
-    const fallbackData = [
-      { _id: 'demo1', code: 'A1', quantity: 10 },
-      { _id: 'demo2', code: 'A2', quantity: 5 },
-      { _id: 'demo3', code: 'B1', quantity: 0 }
-    ];
-    res.json({ inventory: fallbackData, source: 'fallback' });
-  }
-});
-
-function generateDemoData() {
-  try {
-    const filePath = path.join(__dirname, 'color_codes.txt');
-    if (fs.existsSync(filePath)) {
-      const data = fs.readFileSync(filePath, 'utf8');
-      const codes = data.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .slice(0, 50); // 只取前50个作为演示
-      
-      return codes.map((code, index) => ({
-        _id: `demo${index + 1}`,
-        code,
-        quantity: code === 'A1' ? 10 : Math.floor(Math.random() * 5)
-      }));
-    }
-  } catch (error) {
-    console.error('生成演示数据失败:', error);
-  }
-  return [];
-}
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -70,45 +7,41 @@ const fs = require('fs');
 
 const app = express();
 
-// 调试信息
+// ===== 调试信息 =====
 console.log('=== 服务器启动调试信息 ===');
 console.log('当前工作目录:', process.cwd());
 console.log('__dirname:', __dirname);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('VERCEL:', process.env.VERCEL);
+console.log('MONGODB_URI 已设置:', !!process.env.MONGODB_URI);
 
+// 安全地打印连接字符串
+if (process.env.MONGODB_URI) {
+  const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
+  console.log('MongoDB连接字符串:', uriForLog);
+}
+
+// 计算前端文件路径
 const frontendDistPath = process.env.VERCEL 
-  ? path.join(process.cwd(), 'frontend', 'dist')  // Vercel环境
-  : path.join(__dirname, '../frontend/dist');    // 本地环境
+  ? path.join(process.cwd(), 'frontend', 'dist')
+  : path.join(__dirname, '../frontend/dist');
 
 const indexPath = path.join(frontendDistPath, 'index.html');
 
-console.log('进程工作目录:', process.cwd());
 console.log('前端dist路径:', frontendDistPath);
 console.log('index.html路径:', indexPath);
 console.log('index.html存在:', fs.existsSync(indexPath));
 
-// 列出当前工作目录内容
+// 列出目录内容
 try {
   console.log('当前工作目录内容:', fs.readdirSync(process.cwd()));
 } catch (e) {
   console.log('无法读取工作目录:', e.message);
 }
 
-// 检查frontend目录是否存在
-try {
-  const frontendDir = path.join(process.cwd(), 'frontend');
-  console.log('frontend目录存在:', fs.existsSync(frontendDir));
-  if (fs.existsSync(frontendDir)) {
-    console.log('frontend目录内容:', fs.readdirSync(frontendDir));
-  }
-} catch (e) {
-  console.log('无法读取frontend目录:', e.message);
-}
-
 // 中间件
 app.use(cors());
 app.use(express.json());
-
-// 静态文件服务
 app.use(express.static(frontendDistPath));
 
 // ===== MongoDB 连接设置 =====
@@ -120,54 +53,21 @@ let db;
 async function connectDB() {
   try {
     console.log('🔗 尝试连接MongoDB...');
-    console.log('MongoDB URI 已设置:', !!process.env.MONGODB_URI);
     
-    // 安全地打印连接字符串（隐藏密码）
-    if (process.env.MONGODB_URI) {
-      const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
-      console.log('连接字符串:', uriForLog);
-    } else {
-      console.log('❌ MONGODB_URI 环境变量未设置');
+    if (!uri) {
+      console.log('❌ MONGODB_URI 未设置，跳过数据库连接');
       return false;
     }
     
-    // 测试连接参数
-    console.log('连接参数检查:');
-    console.log('- 数据库名称:', 'sheepPD');
-    console.log('- 重试写入:', true);
-    
     dbClient = new MongoClient(uri);
-    console.log('📡 开始连接数据库...');
-    
     await dbClient.connect();
-    console.log('✅ MongoDB 客户端连接成功');
-    
     db = dbClient.db('sheepPD');
-    console.log('✅ 数据库实例创建成功');
-    
-    // 测试数据库操作
-    const adminDb = dbClient.db('admin');
-    const result = await adminDb.command({ ping: 1 });
-    console.log('✅ 数据库ping测试成功:', result);
+    console.log('✅ 成功连接到 MongoDB Atlas');
     
     await initializeCollections();
     return true;
   } catch (e) {
-    console.error('❌ MongoDB 连接失败:');
-    console.error('错误信息:', e.message);
-    console.error('错误代码:', e.code);
-    console.error('错误名称:', e.name);
-    console.error('完整错误:', e);
-    
-    // 提供具体的解决建议
-    if (e.message.includes('ENOTFOUND')) {
-      console.error('💡 解决建议: 检查MongoDB Atlas集群地址是否正确');
-    } else if (e.message.includes('Authentication failed')) {
-      console.error('💡 解决建议: 检查用户名和密码是否正确');
-    } else if (e.message.includes('timed out')) {
-      console.error('💡 解决建议: 检查网络连接和IP白名单设置');
-    }
-    
+    console.error('❌ MongoDB 连接失败:', e.message);
     return false;
   }
 }
@@ -183,16 +83,12 @@ async function importFromColorCodes() {
       return 0;
     }
     
-    console.log('文件存在，开始读取...');
     const data = fs.readFileSync(filePath, 'utf8');
-    console.log('文件内容长度:', data.length);
-    
     const codes = data.split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0);
     
     console.log('解析出的编号数量:', codes.length);
-    console.log('前10个编号:', codes.slice(0, 10));
     
     const inventoryData = codes.map(code => ({
       code,
@@ -202,14 +98,11 @@ async function importFromColorCodes() {
     }));
     
     if (inventoryData.length > 0) {
-      console.log('开始插入数据到数据库...');
       const result = await db.collection('inventory').insertMany(inventoryData);
       console.log(`从color_codes.txt导入了 ${result.insertedCount} 个编号`);
       return result.insertedCount;
-    } else {
-      console.log('color_codes.txt中没有有效数据');
-      return 0;
     }
+    return 0;
   } catch (error) {
     console.error('从color_codes.txt导入数据失败:', error);
     throw error;
@@ -229,15 +122,76 @@ async function initializeCollections() {
       console.log('库存集合为空，开始从color_codes.txt导入数据');
       const importedCount = await importFromColorCodes();
       console.log(`导入完成，共导入 ${importedCount} 条记录`);
-    } else {
-      console.log(`库存集合已有 ${count} 条记录，跳过导入`);
     }
   } catch (e) {
     console.error('初始化集合失败:', e);
   }
 }
 
+// 演示数据生成函数
+function generateDemoData() {
+  try {
+    const filePath = path.join(__dirname, 'color_codes.txt');
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const codes = data.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .slice(0, 50);
+      
+      return codes.map((code, index) => ({
+        _id: `demo${index + 1}`,
+        code,
+        quantity: code === 'A1' ? 10 : Math.floor(Math.random() * 5)
+      }));
+    }
+  } catch (error) {
+    console.error('生成演示数据失败:', error);
+  }
+  return [];
+}
+
 // ===== API 路由 =====
+
+// 健康检查端点
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'SheepPD后端服务运行正常',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    vercel: !!process.env.VERCEL
+  });
+});
+
+// 系统状态检查
+app.get('/api/status', (req, res) => {
+  res.json({
+    backend: 'running',
+    database: db ? 'connected' : 'disconnected',
+    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 演示数据端点
+app.get('/api/inventory/demo', (req, res) => {
+  try {
+    const demoData = generateDemoData();
+    res.json({ 
+      inventory: demoData, 
+      source: 'demo',
+      message: '使用演示数据（数据库连接失败）'
+    });
+  } catch (error) {
+    const fallbackData = [
+      { _id: 'demo1', code: 'A1', quantity: 10 },
+      { _id: 'demo2', code: 'A2', quantity: 5 },
+      { _id: 'demo3', code: 'B1', quantity: 0 }
+    ];
+    res.json({ inventory: fallbackData, source: 'fallback' });
+  }
+});
 
 // API状态检查
 app.get('/api', (req, res) => {
@@ -259,7 +213,6 @@ app.get('/api/db-status', async (req, res) => {
       });
     }
     
-    // 测试数据库连接
     await db.command({ ping: 1 });
     
     res.json({
@@ -472,7 +425,7 @@ app.delete('/api/inventory/:id', async (req, res) => {
   }
 });
 
-// 手动导入数据的API端点
+// 手动导入数据
 app.post('/api/import-from-file', async (req, res) => {
   if (!db) {
     res.status(500).json({ error: '数据库未连接' });
@@ -487,7 +440,7 @@ app.post('/api/import-from-file', async (req, res) => {
   }
 });
 
-// ===== 前端路由（必须放在所有API路由之后） =====
+// ===== 前端路由 =====
 
 // 根路径返回前端页面
 app.get('/', (req, res) => {
@@ -520,23 +473,10 @@ app.get('*', (req, res) => {
   }
 });
 
-
 // ===== 启动逻辑 =====
-
-// 在服务器启动函数中添加更多调试
 async function startServer() {
   try {
-    console.log('=== 服务器启动详细信息 ===');
-    console.log('进程工作目录:', process.cwd());
-    console.log('后端文件位置:', __dirname);
-    
-    const frontendDistPath = path.join(__dirname, '../frontend/dist');
-    const indexPath = path.join(frontendDistPath, 'index.html');
-    
-    console.log('前端dist绝对路径:', frontendDistPath);
-    console.log('index.html绝对路径:', indexPath);
-    console.log('前端dist目录内容:', fs.existsSync(frontendDistPath) ? fs.readdirSync(frontendDistPath) : '目录不存在');
-    console.log('index.html存在:', fs.existsSync(indexPath));
+    console.log('🚀 启动服务器...');
     
     // 连接数据库
     const dbConnected = await connectDB();
@@ -545,8 +485,7 @@ async function startServer() {
     }
     
     if (process.env.VERCEL) {
-      console.log('🚀 运行在Vercel环境');
-      console.log('Vercel环境变量:', Object.keys(process.env).filter(key => key.includes('VERCEL')));
+      console.log('✅ 运行在Vercel环境');
     } else {
       const PORT = process.env.PORT || 3000;
       app.listen(PORT, () => {
@@ -561,5 +500,5 @@ async function startServer() {
 // 启动服务器
 startServer();
 
-// Vercel需要导出app（这是唯一的导出语句）
+// Vercel需要导出app
 module.exports = app;
