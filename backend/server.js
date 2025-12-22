@@ -12,17 +12,31 @@ console.log('=== 服务器启动调试信息 ===');
 console.log('当前工作目录:', process.cwd());
 console.log('__dirname:', __dirname);
 
-const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
+const frontendDistPath = process.env.VERCEL 
+  ? path.join(process.cwd(), 'frontend', 'dist')  // Vercel环境
+  : path.join(__dirname, '../frontend/dist');    // 本地环境
+
 const indexPath = path.join(frontendDistPath, 'index.html');
 
+console.log('进程工作目录:', process.cwd());
 console.log('前端dist路径:', frontendDistPath);
 console.log('index.html路径:', indexPath);
 console.log('index.html存在:', fs.existsSync(indexPath));
 
-// 列出frontend目录内容
+// 列出当前工作目录内容
 try {
-  const frontendDir = path.join(__dirname, '../frontend');
-  console.log('frontend目录内容:', fs.readdirSync(frontendDir));
+  console.log('当前工作目录内容:', fs.readdirSync(process.cwd()));
+} catch (e) {
+  console.log('无法读取工作目录:', e.message);
+}
+
+// 检查frontend目录是否存在
+try {
+  const frontendDir = path.join(process.cwd(), 'frontend');
+  console.log('frontend目录存在:', fs.existsSync(frontendDir));
+  if (fs.existsSync(frontendDir)) {
+    console.log('frontend目录内容:', fs.readdirSync(frontendDir));
+  }
 } catch (e) {
   console.log('无法读取frontend目录:', e.message);
 }
