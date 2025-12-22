@@ -33,9 +33,18 @@ const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let dbClient;
 let db;
 
+
 async function connectDB() {
   try {
-    // 移除已弃用的选项
+    console.log('🔗 尝试连接MongoDB...');
+    console.log('MongoDB URI:', process.env.MONGODB_URI ? '已设置' : '未设置');
+    
+    // 打印部分连接信息（不包含密码）
+    if (process.env.MONGODB_URI) {
+      const uriForLog = process.env.MONGODB_URI.replace(/:([^:]+)@/, ':****@');
+      console.log('连接字符串:', uriForLog);
+    }
+    
     dbClient = new MongoClient(uri);
     
     await dbClient.connect();
@@ -46,6 +55,7 @@ async function connectDB() {
     return true;
   } catch (e) {
     console.error('❌ MongoDB 连接失败:', e.message);
+    console.error('错误详情:', e);
     return false;
   }
 }
@@ -134,6 +144,17 @@ app.get('/', (req, res) => {
   });
 });
 
+// 确保所有非API路由返回前端页面
+app.get('*', (req, res) => {
+  // 如果是API路由，继续处理
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  // 否则返回前端页面
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
+
+
 // API状态检查
 app.get('/api', (req, res) => {
   res.json({ 
@@ -142,6 +163,7 @@ app.get('/api', (req, res) => {
     version: '1.0'
   });
 });
+
 
 // 获取所有库存
 app.get('/api/inventory', async (req, res) => {
