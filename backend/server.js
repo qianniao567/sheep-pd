@@ -111,16 +111,6 @@ async function initializeCollections() {
 
 // ===== API 路由 =====
 
-// 测试接口
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'SheepPD拼豆库存管理系统后端服务启动成功！',
-    timestamp: new Date().toISOString(),
-    version: '1.0',
-    environment: process.env.VERCEL ? 'Vercel' : 'Local'
-  });
-});
-
 // API状态检查
 app.get('/api', (req, res) => {
   res.json({ 
@@ -340,7 +330,14 @@ app.post('/api/import-from-file', async (req, res) => {
   }
 });
 
-// 所有其他路由返回前端页面
+// ===== 前端路由（必须放在所有API路由之后） =====
+
+// 根路径返回前端页面
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
+
+// 所有其他路由返回前端页面（用于支持前端路由）
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
