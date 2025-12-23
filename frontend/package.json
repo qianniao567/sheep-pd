@@ -4,9 +4,7 @@
   "description": "SheepPD拼豆库存管理平台前端",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "vite"
   },
   "dependencies": {
     "vue": "^3.3.4",
