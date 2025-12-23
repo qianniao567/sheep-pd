@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
-    "dev": "cd frontend && npm run dev",
-    "start": "node backend/server.js"
+    "start": "cd backend && node server.js"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0"
   },
   "engines": {
     "node": ">=16.0.0"
