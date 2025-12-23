@@ -24,9 +24,18 @@ if (process.env.MONGODB_URI) {
 app.use(cors());
 app.use(express.json());
 
+
 // 添加请求日志中间件
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} ${req.method} ${req.path} - IP: ${req.ip}`);
+  next();
+});
+
+// 添加数据库连接状态检查
+app.use('/api', (req, res, next) => {
+  if (!db && req.path !== '/health' && req.path !== '/status' && req.path !== '/debug') {
+    console.log(`API ${req.path} 请求时数据库未连接`);
+  }
   next();
 });
 
@@ -296,40 +305,77 @@ app.get('/api/inventory', async (req, res) => {
 // 获取所有字母分类
 app.get('/api/categories', async (req, res) => {
   if (!db) {
-    // 如果没有数据库连接，返回演示数据的分类
+    console.log('数据库未连接，返回演示数据的分类');
     const demoData = generateDemoData();
-    const categories = [...new Set(demoData.map(item => item.code.match(/[A-Z]+/)[0]))].sort();
+    const categories = [...new Set(demoData.map(item => {
+      const match = item.code.match(/[A-Z]+/);
+      return match ? match[0] : '其他';
+    }))].sort();
     return res.json({ categories });
   }
   
   try {
-    const inventory = await db.collection('inventory').find().toArray();
-    // 提取所有字母分类（去重并排序）
-    const categories = [...new Set(inventory.map(item => {
-      // 提取字母部分
-      const match = item.code.match(/[A-Z]+/);
-      return match ? match[0] : '其他';
-    }))].sort();
+    // 使用聚合管道获取所有唯一的字母分类
+    const categories = await db.collection('inventory').aggregate([
+      {
+        $project: {
+          letter: { $substr: ["$code", 0, 1] } // 提取第一个字符（字母）
+        }
+      },
+      {
+        $group: {
+          _id: "$letter"
+        }
+      },
+      {
+        $sort: { _id: 1 } // 按字母排序
+      },
+      {
+        $project: {
+          _id: 0,
+          letter: "$_id"
+        }
+      }
+    ]).toArray();
     
-    res.json({ categories });
+    // 提取字母并排序
+    const letters = categories.map(item => item.letter).sort();
+    console.log(`获取到分类: ${letters.join(', ')}`);
+    
+    res.json({ 
+      categories: letters,
+      count: letters.length
+    });
   } catch (err) {
     console.error('获取分类失败:', err.message);
-    res.json({ categories: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'] });
+    // 返回所有可能的分类
+    res.json({ 
+      categories: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].sort(),
+      source: 'fallback'
+    });
   }
 });
 
 // 获取指定字母分类下的所有编号
 app.get('/api/category/:letter', async (req, res) => {
   const letter = req.params.letter.toUpperCase();
+  console.log(`获取 ${letter} 分类的编号`);
   
   if (!db) {
-    // 如果没有数据库连接，返回演示数据
+    console.log('数据库未连接，返回演示数据');
     const demoData = generateDemoData();
     const items = demoData.filter(item => item.code.startsWith(letter));
+    // 自然排序
+    items.sort((a, b) => {
+      const numA = parseInt(a.code.replace(letter, '')) || 0;
+      const numB = parseInt(b.code.replace(letter, '')) || 0;
+      return numA - numB;
+    });
     return res.json({ 
       letter,
       items,
-      count: items.length
+      count: items.length,
+      source: 'demo'
     });
   }
   
@@ -337,17 +383,31 @@ app.get('/api/category/:letter', async (req, res) => {
     // 使用正则表达式匹配以该字母开头的编号
     const items = await db.collection('inventory')
       .find({ code: { $regex: `^${letter}\\d+` } })
-      .sort({ code: 1 })
       .toArray();
+    
+    // 在内存中进行自然排序
+    items.sort((a, b) => {
+      const numA = parseInt(a.code.replace(letter, '')) || 0;
+      const numB = parseInt(b.code.replace(letter, '')) || 0;
+      return numA - numB;
+    });
+    
+    console.log(`获取到 ${letter} 分类 ${items.length} 个编号`);
     
     res.json({ 
       letter,
       items,
-      count: items.length
+      count: items.length,
+      source: 'database'
     });
   } catch (err) {
     console.error(`获取${letter}分类失败:`, err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      error: err.message,
+      letter,
+      items: [],
+      count: 0
+    });
   }
 });
 
