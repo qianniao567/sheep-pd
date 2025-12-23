@@ -264,6 +264,8 @@ app.get('/api/inventory', async (req, res) => {
     console.log('数据库未连接，返回演示数据');
     try {
       const demoData = generateDemoData();
+      // 对演示数据也进行排序
+      demoData.sort((a, b) => a.code.localeCompare(b.code));
       return res.json({ 
         inventory: demoData, 
         source: 'demo-fallback',
@@ -275,11 +277,14 @@ app.get('/api/inventory', async (req, res) => {
   }
   
   try {
-    const inventory = await db.collection('inventory').find().toArray();
+    // 添加排序：按code字段升序排列
+    const inventory = await db.collection('inventory').find().sort({ code: 1 }).toArray();
     res.json({ inventory });
   } catch (err) {
     console.error('获取库存失败，返回演示数据:', err.message);
     const demoData = generateDemoData();
+    // 对演示数据也进行排序
+    demoData.sort((a, b) => a.code.localeCompare(b.code));
     res.json({ 
       inventory: demoData, 
       source: 'demo-on-error',
