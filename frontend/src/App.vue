@@ -152,14 +152,18 @@ import { ref, computed, onMounted, watch } from 'vue'
 // API 服务
 const apiService = {
   getBaseUrl() {
-    // 自动判断环境
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:3000/api';
-    } else {
-      // 部署环境使用相对路径
-      return '/api';
-    }
-  },
+  // 优先使用环境变量
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // 否则根据当前环境自动判断
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:3000/api';
+  } else {
+    return `${window.location.origin}/api`;
+  }
+},
 
   // 获取后端状态
   async getBackendStatus() {

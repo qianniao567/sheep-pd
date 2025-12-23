@@ -21,28 +21,423 @@ if (process.env.MONGODB_URI) {
   console.log('MongoDB连接字符串:', uriForLog);
 }
 
-// 计算前端文件路径
-const frontendDistPath = process.env.VERCEL 
-  ? path.join(process.cwd(), 'frontend', 'dist')
-  : path.join(__dirname, '../frontend/dist');
-
-const indexPath = path.join(frontendDistPath, 'index.html');
-
-console.log('前端dist路径:', frontendDistPath);
-console.log('index.html路径:', indexPath);
-console.log('index.html存在:', fs.existsSync(indexPath));
-
-// 列出目录内容
-try {
-  console.log('当前工作目录内容:', fs.readdirSync(process.cwd()));
-} catch (e) {
-  console.log('无法读取工作目录:', e.message);
-}
-
 // 中间件
 app.use(cors());
 app.use(express.json());
-app.use(express.static(frontendDistPath));
+
+// 简单的内嵌前端页面
+const simpleFrontendHTML = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐑 SheepPD 拼豆库存管理系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; color: #334155; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; border-radius: 10px; margin-bottom: 2rem; text-align: center; }
+        .header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        .header p { opacity: 0.9; }
+        
+        .controls { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .btn { padding: 0.75rem 1.5rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-secondary { background: #6b7280; color: white; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        
+        .inventory-table { background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .table-header, .table-row { display: grid; grid-template-columns: 1fr 1fr 2fr; padding: 1rem; border-bottom: 1px solid #e5e7eb; }
+        .table-header { background: #f8fafc; font-weight: 600; }
+        .loading { padding: 3rem; text-align: center; }
+        .notification { position: fixed; top: 20px; right: 20px; padding: 1rem 1.5rem; border-radius: 8px; color: white; z-index: 1000; }
+        .success { background: #10b981; }
+        .error { background: #ef4444; }
+        
+        @media (max-width: 768px) {
+            .table-header, .table-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐑 SheepPD 拼豆库存管理系统</h1>
+            <p>lqy专属 - 随时随地在手机上查看和修改库存</p>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" onclick="showAddDialog()">+ 添加编号</button>
+            <button class="btn btn-secondary" onclick="loadInventory()">🔄 刷新</button>
+            <input type="text" id="search" placeholder="搜索编号..." oninput="filterItems()" style="padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; flex: 1;">
+        </div>
+        
+        <div id="loading" class="loading">加载中...</div>
+        
+        <div id="inventory-table" class="inventory-table" style="display: none;">
+            <div class="table-header">
+                <div>编号</div>
+                <div>库存数量</div>
+                <div>操作</div>
+            </div>
+            <div id="table-body"></div>
+        </div>
+        
+        <div id="empty" style="text-align: center; padding: 3rem; display: none;">
+            <div style="font-size: 3rem; opacity: 0.5;">📦</div>
+            <div style="margin: 1rem 0;">暂无库存数据</div>
+            <button class="btn btn-primary" onclick="showAddDialog()">添加第一个库存项</button>
+        </div>
+    </div>
+    
+    <!-- 添加/编辑对话框 -->
+    <div id="addDialog" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
+        <div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 450px;">
+            <h3 id="dialogTitle" style="margin-bottom: 1.5rem;">添加新编号</h3>
+            <div style="margin-bottom: 1.5rem;">
+                <label>编号:</label>
+                <input id="itemCode" placeholder="如: A1, B2" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; margin-top: 0.5rem;">
+            </div>
+            <div style="margin-bottom: 1.5rem;">
+                <label>库存数量:</label>
+                <input id="itemQuantity" type="number" min="0" value="0" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; margin-top: 0.5rem;">
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="closeDialog()">取消</button>
+                <button class="btn btn-primary" onclick="saveItem()" id="saveBtn">添加</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 调整库存对话框 -->
+    <div id="adjustDialog" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
+        <div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 450px;">
+            <h3 id="adjustTitle" style="margin-bottom: 1.5rem;">调整库存</h3>
+            <div style="margin-bottom: 1.5rem;">
+                <label>调整数量:</label>
+                <input id="adjustAmount" type="number" min="1" value="1" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; margin-top: 0.5rem;">
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="closeAdjustDialog()">取消</button>
+                <button class="btn btn-primary" onclick="confirmAdjust()" id="adjustBtn">确认</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    let currentItems = [];
+    let editingItem = null;
+    let adjustingItem = null;
+    let adjustOperation = 'add';
+    
+    // 加载库存数据
+    async function loadInventory() {
+        showLoading();
+        try {
+            const response = await fetch('/api/inventory');
+            if (!response.ok) {
+                throw new Error('获取数据失败');
+            }
+            const data = await response.json();
+            currentItems = data.inventory || [];
+            renderInventory(currentItems);
+        } catch (error) {
+            console.error('获取库存失败:', error);
+            showNotification('获取库存失败: ' + error.message, 'error');
+            // 尝试获取演示数据
+            try {
+                const demoResponse = await fetch('/api/inventory/demo');
+                const demoData = await demoResponse.json();
+                currentItems = demoData.inventory || [];
+                renderInventory(currentItems);
+                showNotification('使用演示数据', 'warning');
+            } catch (e) {
+                showEmpty();
+            }
+        }
+    }
+    
+    // 渲染库存表格
+    function renderInventory(items) {
+        const tableBody = document.getElementById('table-body');
+        const emptyDiv = document.getElementById('empty');
+        const inventoryTable = document.getElementById('inventory-table');
+        
+        if (items.length === 0) {
+            hideLoading();
+            inventoryTable.style.display = 'none';
+            emptyDiv.style.display = 'block';
+            return;
+        }
+        
+        tableBody.innerHTML = '';
+        items.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'table-row';
+            row.innerHTML = \`
+                <div>\${item.code}</div>
+                <div><span style="color: \${item.quantity < 5 ? '#ef4444' : '#10b981'}; font-weight: 600;">\${item.quantity}</span></div>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" onclick="editItem('\${item._id}')">编辑</button>
+                    <button class="btn btn-success" onclick="showAdjustDialog('\${item._id}', 'add')">+</button>
+                    <button class="btn btn-warning" onclick="showAdjustDialog('\${item._id}', 'subtract')">-</button>
+                    <button class="btn btn-danger" onclick="deleteItem('\${item._id}')">删除</button>
+                </div>
+            \`;
+            tableBody.appendChild(row);
+        });
+        
+        hideLoading();
+        emptyDiv.style.display = 'none';
+        inventoryTable.style.display = 'block';
+    }
+    
+    // 搜索过滤
+    function filterItems() {
+        const keyword = document.getElementById('search').value.toLowerCase();
+        if (!keyword) {
+            renderInventory(currentItems);
+            return;
+        }
+        const filtered = currentItems.filter(item => 
+            item.code.toLowerCase().includes(keyword)
+        );
+        renderInventory(filtered);
+    }
+    
+    // 显示添加对话框
+    function showAddDialog() {
+        editingItem = null;
+        document.getElementById('dialogTitle').textContent = '添加新编号';
+        document.getElementById('itemCode').value = '';
+        document.getElementById('itemQuantity').value = 0;
+        document.getElementById('itemCode').disabled = false;
+        document.getElementById('saveBtn').textContent = '添加';
+        document.getElementById('addDialog').style.display = 'flex';
+    }
+    
+    // 关闭对话框
+    function closeDialog() {
+        document.getElementById('addDialog').style.display = 'none';
+    }
+    
+    // 保存项目
+    async function saveItem() {
+        const code = document.getElementById('itemCode').value.trim();
+        const quantity = parseInt(document.getElementById('itemQuantity').value);
+        
+        if (!code) {
+            showNotification('请输入编号', 'error');
+            return;
+        }
+        
+        const saveBtn = document.getElementById('saveBtn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '保存中...';
+        
+        try {
+            let response;
+            if (editingItem) {
+                // 更新
+                response = await fetch(\`/api/inventory/\${editingItem}\`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ quantity })
+                });
+            } else {
+                // 添加
+                response = await fetch('/api/inventory', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code, quantity })
+                });
+            }
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || '保存失败');
+            }
+            
+            showNotification(editingItem ? '更新成功' : '添加成功', 'success');
+            closeDialog();
+            loadInventory();
+        } catch (error) {
+            console.error('保存失败:', error);
+            showNotification('保存失败: ' + error.message, 'error');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = editingItem ? '更新' : '添加';
+        }
+    }
+    
+    // 编辑项目
+    function editItem(id) {
+        const item = currentItems.find(i => i._id === id);
+        if (!item) return;
+        
+        editingItem = id;
+        document.getElementById('dialogTitle').textContent = '编辑库存项';
+        document.getElementById('itemCode').value = item.code;
+        document.getElementById('itemQuantity').value = item.quantity;
+        document.getElementById('itemCode').disabled = true;
+        document.getElementById('saveBtn').textContent = '更新';
+        document.getElementById('addDialog').style.display = 'flex';
+    }
+    
+    // 删除项目
+    async function deleteItem(id) {
+        if (!confirm('确定要删除这个库存项吗？')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(\`/api/inventory/\${id}\`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || '删除失败');
+            }
+            
+            showNotification('删除成功', 'success');
+            loadInventory();
+        } catch (error) {
+            console.error('删除失败:', error);
+            showNotification('删除失败: ' + error.message, 'error');
+        }
+    }
+    
+    // 显示调整对话框
+    function showAdjustDialog(id, operation) {
+        adjustingItem = id;
+        adjustOperation = operation;
+        const item = currentItems.find(i => i._id === id);
+        if (!item) return;
+        
+        document.getElementById('adjustTitle').textContent = \`\${operation === 'add' ? '增加' : '减少'}库存 - \${item.code}\`;
+        document.getElementById('adjustAmount').value = 1;
+        document.getElementById('adjustDialog').style.display = 'flex';
+    }
+    
+    // 关闭调整对话框
+    function closeAdjustDialog() {
+        document.getElementById('adjustDialog').style.display = 'none';
+    }
+    
+    // 确认调整
+    async function confirmAdjust() {
+        const amount = parseInt(document.getElementById('adjustAmount').value);
+        
+        if (!amount || amount <= 0) {
+            showNotification('请输入有效的数量', 'error');
+            return;
+        }
+        
+        const adjustBtn = document.getElementById('adjustBtn');
+        adjustBtn.disabled = true;
+        adjustBtn.textContent = '处理中...';
+        
+        try {
+            const response = await fetch(\`/api/inventory/\${adjustingItem}/adjust\`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ operation: adjustOperation, amount })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || '调整失败');
+            }
+            
+            showNotification(\`库存\${adjustOperation === 'add' ? '增加' : '减少'}成功\`, 'success');
+            closeAdjustDialog();
+            loadInventory();
+        } catch (error) {
+            console.error('调整失败:', error);
+            showNotification('调整失败: ' + error.message, 'error');
+        } finally {
+            adjustBtn.disabled = false;
+            adjustBtn.textContent = '确认';
+        }
+    }
+    
+    // 显示通知
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.className = \`notification \${type}\`;
+        notification.textContent = message;
+        notification.style.animation = 'slideIn 0.3s ease-out';
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease-out';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+        
+        // 添加动画样式
+        if (!document.getElementById('slideOutStyle')) {
+            const style = document.createElement('style');
+            style.id = 'slideOutStyle';
+            style.textContent = \`
+                @keyframes slideOut {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(100%); opacity: 0; }
+                }
+            \`;
+            document.head.appendChild(style);
+        }
+    }
+    
+    // 显示/隐藏加载
+    function showLoading() {
+        document.getElementById('loading').style.display = 'block';
+    }
+    
+    function hideLoading() {
+        document.getElementById('loading').style.display = 'none';
+    }
+    
+    // 显示空状态
+    function showEmpty() {
+        hideLoading();
+        document.getElementById('inventory-table').style.display = 'none';
+        document.getElementById('empty').style.display = 'block';
+    }
+    
+    // 页面加载时获取数据
+    window.onload = loadInventory;
+    </script>
+</body>
+</html>
+`;
+
+// 根路径返回简单前端页面
+app.get('/', (req, res) => {
+  console.log('📄 访问根路径，返回简单前端页面');
+  res.set('Content-Type', 'text/html');
+  res.send(simpleFrontendHTML);
+});
+
+// 所有其他非API路由返回前端页面
+app.get('*', (req, res, next) => {
+  console.log('🔀 捕获路由:', req.path);
+  
+  // 如果请求以 /api 开头，继续处理API
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  // 否则返回前端页面
+  res.set('Content-Type', 'text/html');
+  res.send(simpleFrontendHTML);
+});
 
 // ===== MongoDB 连接设置 =====
 const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
@@ -169,7 +564,7 @@ app.get('/api/status', (req, res) => {
   res.json({
     backend: 'running',
     database: db ? 'connected' : 'disconnected',
-    frontend: fs.existsSync(indexPath) ? 'available' : 'missing',
+    frontend: 'embedded', // 改为embedded，因为我们使用内嵌前端
     timestamp: new Date().toISOString()
   });
 });
@@ -437,39 +832,6 @@ app.post('/api/import-from-file', async (req, res) => {
     res.json({ message: `成功导入 ${count} 条记录` });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== 前端路由 =====
-
-// 根路径返回前端页面
-app.get('/', (req, res) => {
-  console.log('📄 访问根路径，返回前端页面');
-  
-  if (fs.existsSync(indexPath)) {
-    console.log('✅ 找到index.html，发送文件');
-    res.sendFile(indexPath);
-  } else {
-    console.log('❌ index.html不存在，返回错误信息');
-    res.status(500).json({
-      error: '前端文件未找到',
-      path: indexPath,
-      suggestion: '请运行: cd frontend && npm run build'
-    });
-  }
-});
-
-// 所有其他路由返回前端页面
-app.get('*', (req, res) => {
-  console.log('🔀 捕获路由:', req.path, '返回前端页面');
-  
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(404).json({
-      error: '页面未找到',
-      path: req.path
-    });
   }
 });
 
