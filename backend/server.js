@@ -46,49 +46,47 @@ let dbClient;
 let db;
 
 async function connectDB() {
-  try {
-    console.log('🔗 尝试连接MongoDB...');
-    
-    if (!uri) {
-      console.log('❌ MONGODB_URI 未设置，跳过数据库连接');
-      return false;
+  let retries = 3;
+  
+  while (retries > 0) {
+    try {
+      console.log('🔗 尝试连接MongoDB...');
+      
+      if (!uri) {
+        console.log('❌ MONGODB_URI 未设置');
+        return false;
+      }
+      
+      console.log('连接字符串（隐藏密码）:', uri.replace(/:([^:]+)@/, ':****@'));
+      
+      dbClient = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000
+      });
+      
+      await dbClient.connect();
+      db = dbClient.db('sheepPD');
+      console.log('✅ 成功连接到 MongoDB Atlas');
+      
+      // 测试数据库操作
+      await db.command({ ping: 1 });
+      console.log('✅ 数据库ping成功');
+      
+      await initializeCollections();
+      return true;
+    } catch (e) {
+      retries--;
+      console.error(`❌ MongoDB 连接失败 (剩余重试次数: ${retries}):`, e.message);
+      
+      if (retries === 0) {
+        return false;
+      }
+      
+      // 等待2秒后重试
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    
-    console.log('连接字符串（隐藏密码）:', uri.replace(/:([^:]+)@/, ':****@'));
-    
-    // 增加连接超时时间
-    dbClient = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000
-    });
-    
-    await dbClient.connect();
-    db = dbClient.db('sheepPD');
-    console.log('✅ 成功连接到 MongoDB Atlas');
-    
-    // 测试数据库操作
-    const collections = await db.listCollections().toArray();
-    console.log('可用集合:', collections.map(c => c.name));
-    
-    await initializeCollections();
-    return true;
-  } catch (e) {
-    console.error('❌ MongoDB 连接失败:');
-    console.error('错误信息:', e.message);
-    
-    // 提供详细的错误信息
-    if (e.message.includes('bad auth')) {
-      console.log('可能原因: 用户名或密码错误');
-    } else if (e.message.includes('ENOTFOUND')) {
-      console.log('可能原因: 主机名解析失败，请检查连接字符串中的集群地址');
-    } else if (e.message.includes('timeout')) {
-      console.log('可能原因: 连接超时，请检查网络或MongoDB Atlas状态');
-    } else if (e.message.includes('not authorized')) {
-      console.log('可能原因: 用户没有权限访问数据库');
-    }
-    
-    return false;
   }
+  return false;
 }
 
 async function importFromColorCodes() {
