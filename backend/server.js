@@ -418,23 +418,15 @@ const simpleFrontendHTML = `
 </html>
 `;
 
-// 根路径返回简单前端页面
 app.get('/', (req, res) => {
   console.log('📄 访问根路径，返回简单前端页面');
   res.set('Content-Type', 'text/html');
   res.send(simpleFrontendHTML);
 });
 
-// 所有其他非API路由返回前端页面
-app.get('*', (req, res, next) => {
-  console.log('🔀 捕获路由:', req.path);
-  
-  // 如果请求以 /api 开头，继续处理API
-  if (req.path.startsWith('/api/')) {
-    return next();
-  }
-  
-  // 否则返回前端页面
+// 所有其他路由返回前端页面
+app.get('*', (req, res) => {
+  console.log('🔀 捕获路由:', req.path, '返回前端页面');
   res.set('Content-Type', 'text/html');
   res.send(simpleFrontendHTML);
 });
@@ -590,8 +582,17 @@ app.get('/api/status', (req, res) => {
   res.json({
     backend: 'running',
     database: db ? 'connected' : 'disconnected',
-    frontend: 'embedded', // 改为embedded，因为我们使用内嵌前端
+    frontend: 'embedded',
     timestamp: new Date().toISOString()
+  });
+});
+
+// API状态检查
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'SheepPD拼豆库存管理系统API服务正常',
+    timestamp: new Date().toISOString(),
+    version: '1.0'
   });
 });
 
@@ -612,15 +613,6 @@ app.get('/api/inventory/demo', (req, res) => {
     ];
     res.json({ inventory: fallbackData, source: 'fallback' });
   }
-});
-
-// API状态检查
-app.get('/api', (req, res) => {
-  res.json({ 
-    message: 'SheepPD拼豆库存管理系统API服务正常',
-    timestamp: new Date().toISOString(),
-    version: '1.0'
-  });
 });
 
 // 数据库连接状态检查
@@ -654,15 +646,30 @@ app.get('/api/db-status', async (req, res) => {
 // 获取所有库存
 app.get('/api/inventory', async (req, res) => {
   if (!db) {
-    res.status(500).json({ error: '数据库未连接' });
-    return;
+    console.log('数据库未连接，返回演示数据');
+    try {
+      const demoData = generateDemoData();
+      return res.json({ 
+        inventory: demoData, 
+        source: 'demo-fallback',
+        message: '数据库未连接，使用演示数据'
+      });
+    } catch (error) {
+      return res.status(500).json({ error: '无法获取数据' });
+    }
   }
   
   try {
     const inventory = await db.collection('inventory').find().toArray();
     res.json({ inventory });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('获取库存失败，返回演示数据:', err.message);
+    const demoData = generateDemoData();
+    res.json({ 
+      inventory: demoData, 
+      source: 'demo-on-error',
+      message: '数据库错误，使用演示数据'
+    });
   }
 });
 
